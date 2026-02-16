@@ -17,7 +17,15 @@ const ENV_PORT_VAR: &str = "UPYREMOTE_PORT";
 
 #[derive(Parser)]
 #[command(name = "upyremote")]
-#[command(about = "CLI tool for interacting with MicroPython devices")]
+#[command(about = "Universal CLI tool for MicroPython REPL and upyOS remote management")]
+#[command(
+    long_about = "Universal CLI tool for MicroPython REPL and upyOS remote management
+
+Port Configuration:
+  Default port: /dev/ttyACM0
+  Environment variable: UPYREMOTE_PORT
+  Priority: -p argument > UPYREMOTE_PORT env var > default"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -27,7 +35,7 @@ struct Cli {
 enum Commands {
     /// Connect to device and open interactive REPL
     Connect {
-        /// Serial port (e.g., /dev/ttyACM0 or COM3)
+        /// Serial port [default: /dev/ttyACM0, env: UPYREMOTE_PORT]
         #[arg(short, long)]
         port: Option<String>,
         /// Baud rate
@@ -36,7 +44,7 @@ enum Commands {
     },
     /// List files on device
     Ls {
-        /// Serial port
+        /// Serial port [default: /dev/ttyACM0, env: UPYREMOTE_PORT]
         #[arg(short, long)]
         port: Option<String>,
         /// Directory to list
@@ -45,7 +53,7 @@ enum Commands {
     },
     /// Upload a file to device
     Put {
-        /// Serial port
+        /// Serial port [default: /dev/ttyACM0, env: UPYREMOTE_PORT]
         #[arg(short, long)]
         port: Option<String>,
         /// Local file
@@ -55,7 +63,7 @@ enum Commands {
     },
     /// Download a file from device
     Get {
-        /// Serial port
+        /// Serial port [default: /dev/ttyACM0, env: UPYREMOTE_PORT]
         #[arg(short, long)]
         port: Option<String>,
         /// File on device
@@ -65,7 +73,7 @@ enum Commands {
     },
     /// Execute a command on device
     Exec {
-        /// Serial port
+        /// Serial port [default: /dev/ttyACM0, env: UPYREMOTE_PORT]
         #[arg(short, long)]
         port: Option<String>,
         /// Command to execute
@@ -73,7 +81,7 @@ enum Commands {
     },
     /// Reset device
     Reset {
-        /// Serial port
+        /// Serial port [default: /dev/ttyACM0, env: UPYREMOTE_PORT]
         #[arg(short, long)]
         port: Option<String>,
         /// Hard reset (complete reset)
@@ -82,18 +90,18 @@ enum Commands {
     },
     /// Run a Python file on device
     Run {
-        /// Serial port
+        /// Serial port [default: /dev/ttyACM0, env: UPYREMOTE_PORT]
         #[arg(short, long)]
         port: Option<String>,
         /// File to run
         file: PathBuf,
     },
-    /// Send a string to device and display response
+    /// Send commands to device and display execution results
     Send {
-        /// Serial port
+        /// Serial port [default: /dev/ttyACM0, env: UPYREMOTE_PORT]
         #[arg(short, long)]
         port: Option<String>,
-        /// String to send
+        /// Command to execute (in upyOS) or string to send (in REPL)
         data: String,
         /// Timeout in seconds for response (if not specified, waits for prompt)
         #[arg(short, long)]

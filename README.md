@@ -1,15 +1,20 @@
 # upyremote
 
-Rust CLI tool for interacting with MicroPython devices, inspired by mpremote. Supports both standard MicroPython REPL and [upyOS](https://github.com/rbenrax/upyOS) (POSIX-like OS for microcontrollers).
+Universal CLI tool for remote device management supporting both **MicroPython REPL** and **upyOS** (POSIX-like shell environment for microcontrollers). Execute commands, transfer files, and manage devices seamlessly across both environments.
 
 ## Features
 
-- **Automatic Mode Detection**: Automatically detects if device is in MicroPython REPL or upyOS mode
-- **Interactive REPL Connection**: Connect directly to device with support for history and line editing
-- **File Transfer**: Upload and download files (base64 for REPL, direct transfer for upyOS)
-- **Command Execution**: Execute Python commands in REPL mode, shell commands in upyOS mode
-- **Device Management**: Soft and hard reset of the device
-- **Script Mode**: Compatible with pipes and redirection
+- **Dual Environment Support**: Works with both MicroPython REPL and upyOS shell
+- **Automatic Mode Detection**: Automatically identifies if device is running MicroPython REPL (`>>>`) or upyOS (`/ $:`)
+- **Command Execution**:
+  - `exec`/`run`: Execute Python code in MicroPython REPL mode
+  - `send`: Send shell commands to upyOS and receive execution results
+- **File Transfer**: Upload and download files
+  - MicroPython: Uses base64 encoding via raw REPL protocol
+  - upyOS: Uses native shell commands (`fileup`, `cat`)
+- **Interactive Sessions**: Connect to either REPL or upyOS shell with full terminal support
+- **Device Management**: Soft and hard reset capabilities
+- **Script Mode**: Compatible with pipes and automation scripts
 - **Cross-platform**: Works on Linux, macOS, and Windows
 
 ## Installation
@@ -36,14 +41,15 @@ upyremote automatically detects the operating mode of your MicroPython device:
 ### MicroPython REPL Mode
 Standard MicroPython interactive prompt (`>>>`).
 - Uses raw REPL protocol for file transfers
-- Supports Python code execution
+- Supports Python code execution via `exec` and `run` commands
 - Base64 encoding for binary file transfers
 
 ### upyOS Mode
 [upyOS](https://github.com/rbenrax/upyOS) provides a POSIX-like shell environment (`/ $:`).
 - Linux-like shell commands
 - Direct file operations using shell commands
-- Support for upyOS-specific features
+- Execute commands using `send` and receive output
+- Support for upyOS-specific features (process management, networking, etc.)
 
 Upon connection, upyremote displays the detected mode:
 ```
@@ -60,10 +66,10 @@ Upon connection, upyremote displays the detected mode:
 | `ls` | ✓ | ✓ | List files |
 | `put` | ✓ | ✓ | Upload file |
 | `get` | ✓ | ✓ | Download file |
-| `send` | ✓ | ✓ | Send raw string |
+| `send` | ✓ | ✓ | Send command and display result |
 | `reset` | ✓ | ✓ | Reset device |
-| `exec` | ✓ | ✗ | Execute Python code |
-| `run` | ✓ | ✗ | Run Python file |
+| `exec` | ✓ | ✗ | Execute Python code (REPL only) |
+| `run` | ✓ | ✗ | Run Python file (REPL only) |
 
 ### Commands
 
@@ -117,8 +123,8 @@ upyremote put -p /dev/ttyACM0 local_file.py /remote/path/file.py
 upyremote put -p /dev/ttyACM0 script.sh /bin/myscript
 ```
 
-**MicroPython REPL mode:** Uses base64 encoding via raw REPL protocol
-**upyOS mode:** Uses `cat` command with heredoc
+**MicroPython REPL mode:** Uses base64 encoding via raw REPL protocol  
+**upyOS mode:** Uses `fileup` command with line-by-line transfer
 
 #### `get` - Download File
 
@@ -132,7 +138,7 @@ upyremote get -p /dev/ttyACM0 /remote/file.py
 upyremote get -p /dev/ttyACM0 /remote/file.py local_backup.py
 ```
 
-**MicroPython REPL mode:** Uses base64 decoding via raw REPL protocol
+**MicroPython REPL mode:** Uses base64 decoding via raw REPL protocol  
 **upyOS mode:** Uses `cat` command
 
 #### `exec` - Execute Python Command
@@ -156,23 +162,33 @@ upyremote run -p /dev/ttyACM0 script.py
 
 **Note:** Will display error if device is in upyOS mode.
 
-#### `send` - Send Text String
+#### `send` - Send Command and Display Result
 
-Works in both modes. Universal command for sending raw strings.
+Universal command that works in both modes. Sends commands to the device and returns the execution output.
 
+**In upyOS mode:** Executes shell commands and displays results
 ```bash
-# Auto-detects prompt (waits for >>> or $:)
-upyremote send -p /dev/ttyACM0 "print('Hello')"
-
-# With timeout (for commands that take time)
-upyremote send -p /dev/ttyACM0 "wifi sta scan" -t 5
-
-# upyOS shell command
+# upyOS: List processes
 upyremote send -p /dev/ttyACM0 "ps"
+
+# upyOS: Check WiFi status
+upyremote send -p /dev/ttyACM0 "wifi sta status"
+
+# upyOS: System information
+upyremote send -p /dev/ttyACM0 "lshw"
+
+# upyOS: With timeout for slow commands
+upyremote send -p /dev/ttyACM0 "wifi sta scan" -t 5
+```
+
+**In MicroPython REPL mode:** Sends raw text
+```bash
+# Send raw string
+upyremote send -p /dev/ttyACM0 "print('Hello')"
 ```
 
 Options:
-- Without `-t`: Waits for device prompt
+- Without `-t`: Waits for device prompt (`>>>` or `$:`)
 - With `-t`: Reads for specified seconds
 
 #### `reset` - Reset Device
@@ -219,7 +235,7 @@ upyremote ls -p /dev/ttyACM0 /
 # Upload a script to upyOS
 upyremote put -p /dev/ttyACM0 mi_script.sh /bin/mi_script
 
-# Execute upyOS command
+# Execute upyOS command and see result
 upyremote send -p /dev/ttyACM0 "wifi sta status"
 
 # View running processes
@@ -227,6 +243,12 @@ upyremote send -p /dev/ttyACM0 "ps"
 
 # Check system info
 upyremote send -p /dev/ttyACM0 "lshw"
+
+# Start a background process
+upyremote send -p /dev/ttyACM0 "python sensor.py &"
+
+# Check the process is running
+upyremote send -p /dev/ttyACM0 "ps"
 ```
 
 ### Mixed Mode Workflow
