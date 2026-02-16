@@ -1,12 +1,13 @@
 # upyremote
 
-Rust CLI tool for interacting with MicroPython devices, inspired by mpremote.
+Rust CLI tool for interacting with MicroPython devices, inspired by mpremote. Supports both standard MicroPython REPL and [upyOS](https://github.com/rbenrax/upyOS) (POSIX-like OS for microcontrollers).
 
 ## Features
 
-- **Interactive REPL Connection**: Connect directly to MicroPython REPL with support for history and line editing
-- **File Transfer**: Upload and download files using base64 encoding
-- **Command Execution**: Execute Python commands remotely
+- **Automatic Mode Detection**: Automatically detects if device is in MicroPython REPL or upyOS mode
+- **Interactive REPL Connection**: Connect directly to device with support for history and line editing
+- **File Transfer**: Upload and download files (base64 for REPL, direct transfer for upyOS)
+- **Command Execution**: Execute Python commands in REPL mode, shell commands in upyOS mode
 - **Device Management**: Soft and hard reset of the device
 - **Script Mode**: Compatible with pipes and redirection
 - **Cross-platform**: Works on Linux, macOS, and Windows
@@ -28,155 +29,227 @@ The compiled binary will be at `./target/release/upyremote`
 - Rust 1.70 or higher
 - Serial port access (usually requires belonging to the `dialout` group on Linux)
 
+## Device Modes
+
+upyremote automatically detects the operating mode of your MicroPython device:
+
+### MicroPython REPL Mode
+Standard MicroPython interactive prompt (`>>>`).
+- Uses raw REPL protocol for file transfers
+- Supports Python code execution
+- Base64 encoding for binary file transfers
+
+### upyOS Mode
+[upyOS](https://github.com/rbenrax/upyOS) provides a POSIX-like shell environment (`/ $:`).
+- Linux-like shell commands
+- Direct file operations using shell commands
+- Support for upyOS-specific features
+
+Upon connection, upyremote displays the detected mode:
+```
+[INFO] Detected mode: upyOS (Linux-like shell)
+```
+
 ## Usage
 
-### Available Commands
+### Available Commands by Mode
 
-#### `connect` - Interactive REPL Connection
+| Command | MicroPython REPL | upyOS | Description |
+|---------|------------------|-------|-------------|
+| `connect` | ✓ | ✓ | Interactive REPL/shell session |
+| `ls` | ✓ | ✓ | List files |
+| `put` | ✓ | ✓ | Upload file |
+| `get` | ✓ | ✓ | Download file |
+| `send` | ✓ | ✓ | Send raw string |
+| `reset` | ✓ | ✓ | Reset device |
+| `exec` | ✓ | ✗ | Execute Python code |
+| `run` | ✓ | ✗ | Run Python file |
+
+### Commands
+
+#### `connect` - Interactive Connection
 
 ```bash
 upyremote connect -p /dev/ttyACM0
 ```
 
-Opens an interactive REPL session with the device. Press `Ctrl+X` to exit.
+Opens an interactive session. Mode-appropriate prompt is displayed:
+- MicroPython: `MicroPython REPL ---`
+- upyOS: `upyOS Shell ---`
 
-**Keyboard shortcuts in REPL mode:**
+Press `Ctrl+X` to exit.
+
+**Keyboard shortcuts:**
 
 | Shortcut | Action |
 |----------|--------|
-| `Ctrl+X` | Exit REPL |
-| `Ctrl+C` | Interrupt running program |
+| `Ctrl+X` | Exit session |
+| `Ctrl+C` | Interrupt program |
 | `Ctrl+D` | EOF / Soft reset |
-| `Ctrl+A` | Go to beginning of line |
-| `Ctrl+E` | Go to end of line |
+| `Ctrl+A` | Beginning of line |
+| `Ctrl+E` | End of line |
 | `Ctrl+K` | Delete to end of line |
 | `Ctrl+U` | Delete entire line |
 | `Ctrl+W` | Delete previous word |
-| `Ctrl+←` | Jump word backward |
-| `Ctrl+→` | Jump word forward |
-| `↑` / `↓` | Navigate command history |
-| `←` / `→` | Move cursor |
-| `Home` / `End` | Go to beginning/end of line |
-| `Delete` | Delete character under cursor |
+| `Ctrl+←/→` | Jump word by word |
+| `↑/↓` | Command history |
 
 #### `ls` - List Files
+
+Works in both modes automatically.
 
 ```bash
 upyremote ls -p /dev/ttyACM0 /path/directory
 ```
 
-Lists files in the specified directory on the device.
-
 #### `put` - Upload File
 
+Automatically adapts transfer method based on detected mode.
+
 ```bash
+# Upload to current directory
+upyremote put -p /dev/ttyACM0 local_file.py
+
+# Upload to specific path
 upyremote put -p /dev/ttyACM0 local_file.py /remote/path/file.py
+
+# Upload to upyOS specific location
+upyremote put -p /dev/ttyACM0 script.sh /bin/myscript
 ```
 
-Uploads a local file to the device. If destination is not specified, uses the local filename.
+**MicroPython REPL mode:** Uses base64 encoding via raw REPL protocol
+**upyOS mode:** Uses `cat` command with heredoc
 
 #### `get` - Download File
 
+Automatically adapts transfer method based on detected mode.
+
 ```bash
-upyremote get -p /dev/ttyACM0 /remote/path/file.py local_file.py
+# Download to current directory
+upyremote get -p /dev/ttyACM0 /remote/file.py
+
+# Download to specific path
+upyremote get -p /dev/ttyACM0 /remote/file.py local_backup.py
 ```
 
-Downloads a file from the device. If local destination is not specified, uses the remote filename.
+**MicroPython REPL mode:** Uses base64 decoding via raw REPL protocol
+**upyOS mode:** Uses `cat` command
 
 #### `exec` - Execute Python Command
+
+Only available in MicroPython REPL mode.
 
 ```bash
 upyremote exec -p /dev/ttyACM0 "print('Hello World')"
 upyremote exec -p /dev/ttyACM0 "import os; print(os.listdir('/'))"
 ```
 
-Executes Python code on the device using the raw REPL protocol.
+**Note:** Will display error if device is in upyOS mode.
 
 #### `run` - Run Python File
+
+Only available in MicroPython REPL mode.
 
 ```bash
 upyremote run -p /dev/ttyACM0 script.py
 ```
 
-Reads a local Python file and executes it on the device.
+**Note:** Will display error if device is in upyOS mode.
 
 #### `send` - Send Text String
 
+Works in both modes. Universal command for sending raw strings.
+
 ```bash
-# Automatically waits for prompt (>>> or $:)
+# Auto-detects prompt (waits for >>> or $:)
 upyremote send -p /dev/ttyACM0 "print('Hello')"
 
-# With specific timeout (in seconds)
-upyremote send -p /dev/ttyACM0 "command" -t 5
+# With timeout (for commands that take time)
+upyremote send -p /dev/ttyACM0 "wifi sta scan" -t 5
+
+# upyOS shell command
+upyremote send -p /dev/ttyACM0 "ps"
 ```
 
-Sends a text string directly to the serial port and displays the response.
-- Without `-t`: Waits until the device prompt is received
-- With `-t`: Reads for the specified duration
+Options:
+- Without `-t`: Waits for device prompt
+- With `-t`: Reads for specified seconds
 
 #### `reset` - Reset Device
+
+Works in both modes.
 
 ```bash
 # Soft reset (Ctrl+D in MicroPython)
 upyremote reset -p /dev/ttyACM0
 
-# Hard reset (toggles DTR/RTS signals)
+# Hard reset (DTR/RTS toggle)
 upyremote reset -p /dev/ttyACM0 -H
 ```
 
 ## Usage Examples
 
-### Basic Connection
+### MicroPython REPL Mode
 
 ```bash
-# Connect to REPL
+# Connect and work interactively
 upyremote connect -p /dev/ttyACM0
+# >>> print("Hello from MicroPython")
 
-# In the REPL, you can use:
-# >>> print("Hello")
-# >>> import os
-# >>> os.listdir('/')
-```
+# Execute Python code
+upyremote exec -p /dev/ttyACM0 "print(2+2)"
 
-### File Management
-
-```bash
 # Upload a script
 upyremote put -p /dev/ttyACM0 main.py
 
-# Download a log file
-upyremote get -p /dev/ttyACM0 /log.txt backup_log.txt
-
-# View files in root directory
-upyremote ls -p /dev/ttyACM0 /
+# Run a script
+upyremote run -p /dev/ttyACM0 sensor.py
 ```
 
-### Command Execution
+### upyOS Mode
 
 ```bash
-# Execute simple code
-upyremote exec -p /dev/ttyACM0 "print(2+2)"
-
-# View system information
-upyremote exec -p /dev/ttyACM0 "import sys; print(sys.version)"
+# Connect to upyOS shell
+upyremote connect -p /dev/ttyACM0
+# / $: ls
 
 # List files
-upyremote exec -p /dev/ttyACM0 "import os; print(os.listdir('/'))"
+upyremote ls -p /dev/ttyACM0 /
+
+# Upload a script to upyOS
+upyremote put -p /dev/ttyACM0 mi_script.sh /bin/mi_script
+
+# Execute upyOS command
+upyremote send -p /dev/ttyACM0 "wifi sta status"
+
+# View running processes
+upyremote send -p /dev/ttyACM0 "ps"
+
+# Check system info
+upyremote send -p /dev/ttyACM0 "lshw"
 ```
 
-### Script Usage
+### Mixed Mode Workflow
 
 ```bash
-# Send multiple commands
-echo -e "x = 100\nprint(x)" | upyremote connect -p /dev/ttyACM0
+# Device boots into upyOS
+# Upload a Python script
+upyremote put -p /dev/ttyACM0 app.py /
 
-# Automate tasks
-upyremote send -p /dev/ttyACM0 "import machine; machine.freq()" -t 2
+# Execute it in upyOS
+upyremote send -p /dev/ttyACM0 "python app.py &"
+
+# Check it's running
+upyremote send -p /dev/ttyACM0 "ps"
+
+# Soft reset to enter MicroPython REPL mode
+upyremote reset -p /dev/ttyACM0
+
+# Now exec works
+upyremote exec -p /dev/ttyACM0 "print('Now in REPL mode')"
 ```
 
 ## Global Options
-
-Each command accepts the following options:
 
 - `-p, --port <PORT>`: Serial port (default: `/dev/ttyUSB0`)
   - Linux: `/dev/ttyUSB0`, `/dev/ttyACM0`
@@ -185,7 +258,26 @@ Each command accepts the following options:
 
 ## Troubleshooting
 
-### Permission denied accessing port
+### Mode Detection Failed
+
+If mode detection fails, some commands may not work properly. Try:
+
+```bash
+# Send a simple command to verify connectivity
+upyremote send -p /dev/ttyACM0 "help" -t 2
+```
+
+### Command Not Available in Current Mode
+
+Error example:
+```
+Error: This command requires MicroPython REPL mode, but device is in upyOS (Linux-like shell) mode.
+Use 'upyremote send' command for upyOS operations or restart device to MicroPython mode.
+```
+
+**Solution:** Use `send` command for upyOS operations or reset device to switch modes.
+
+### Permission Denied
 
 On Linux, add your user to the `dialout` group:
 
@@ -194,43 +286,28 @@ sudo usermod -a -G dialout $USER
 # Log out and log back in
 ```
 
-### Device not found
+### Port Busy
 
-Verify that the device is connected:
-
-```bash
-# Linux
-ls -la /dev/ttyACM* /dev/ttyUSB*
-
-# macOS
-ls -la /dev/cu.*
-```
-
-### Port busy
-
-If you receive "Device or resource busy", check that no other process is using the port:
+Check for other processes using the port:
 
 ```bash
 lsof /dev/ttyACM0
-# or
 fuser /dev/ttyACM0
 ```
 
 ## Development
 
-### Compile in debug mode
+### Compile
 
 ```bash
+# Debug mode
 cargo build
-```
 
-### Compile in release mode (optimized)
-
-```bash
+# Release mode (optimized)
 cargo build --release
 ```
 
-### Run tests
+### Run Tests
 
 ```bash
 cargo test
@@ -238,11 +315,15 @@ cargo test
 
 ## Architecture
 
-The project uses:
 - **clap**: Command line argument parser
 - **serialport**: Cross-platform serial communication
-- **crossterm**: Raw terminal handling for interactive REPL
+- **crossterm**: Raw terminal handling for interactive mode
 - **anyhow**: Error handling
+
+## Related Projects
+
+- [mpremote](https://docs.micropython.org/en/latest/reference/mpremote.html): Official MicroPython tool
+- [upyOS](https://github.com/rbenrax/upyOS): POSIX-like OS for microcontrollers
 
 ## License
 
@@ -250,8 +331,4 @@ MIT License - See LICENSE for details.
 
 ## Contributing
 
-Contributions are welcome. Please open an issue or pull request.
-
-## Acknowledgments
-
-Inspired by [mpremote](https://docs.micropython.org/en/latest/reference/mpremote.html), the official MicroPython tool.
+Contributions are welcome! Please open an issue or pull request.
