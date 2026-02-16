@@ -1,0 +1,11 @@
+[package]
+name = "upyremote"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }
+serialport = { version = "4.6", default-features = false }
+anyhow = "1.0"
+crossterm = "0.28"
+atty = "0.2"
