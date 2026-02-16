@@ -12,6 +12,9 @@ use std::{
     time::Duration,
 };
 
+const DEFAULT_PORT: &str = "/dev/ttyACM0";
+const ENV_PORT_VAR: &str = "UPYREMOTE_PORT";
+
 #[derive(Parser)]
 #[command(name = "upyremote")]
 #[command(about = "CLI tool for interacting with MicroPython devices")]
@@ -24,9 +27,9 @@ struct Cli {
 enum Commands {
     /// Connect to device and open interactive REPL
     Connect {
-        /// Serial port (e.g., /dev/ttyUSB0 or COM3)
-        #[arg(short, long, default_value = "/dev/ttyUSB0")]
-        port: String,
+        /// Serial port (e.g., /dev/ttyACM0 or COM3)
+        #[arg(short, long)]
+        port: Option<String>,
         /// Baud rate
         #[arg(short, long, default_value = "115200")]
         baud: u32,
@@ -34,8 +37,8 @@ enum Commands {
     /// List files on device
     Ls {
         /// Serial port
-        #[arg(short, long, default_value = "/dev/ttyUSB0")]
-        port: String,
+        #[arg(short, long)]
+        port: Option<String>,
         /// Directory to list
         #[arg(default_value = "/")]
         path: String,
@@ -43,8 +46,8 @@ enum Commands {
     /// Upload a file to device
     Put {
         /// Serial port
-        #[arg(short, long, default_value = "/dev/ttyUSB0")]
-        port: String,
+        #[arg(short, long)]
+        port: Option<String>,
         /// Local file
         source: PathBuf,
         /// Destination on device (optional)
@@ -53,8 +56,8 @@ enum Commands {
     /// Download a file from device
     Get {
         /// Serial port
-        #[arg(short, long, default_value = "/dev/ttyUSB0")]
-        port: String,
+        #[arg(short, long)]
+        port: Option<String>,
         /// File on device
         source: String,
         /// Local destination (optional)
@@ -63,16 +66,16 @@ enum Commands {
     /// Execute a command on device
     Exec {
         /// Serial port
-        #[arg(short, long, default_value = "/dev/ttyUSB0")]
-        port: String,
+        #[arg(short, long)]
+        port: Option<String>,
         /// Command to execute
         command: String,
     },
     /// Reset device
     Reset {
         /// Serial port
-        #[arg(short, long, default_value = "/dev/ttyUSB0")]
-        port: String,
+        #[arg(short, long)]
+        port: Option<String>,
         /// Hard reset (complete reset)
         #[arg(short = 'H', long)]
         hard: bool,
@@ -80,22 +83,31 @@ enum Commands {
     /// Run a Python file on device
     Run {
         /// Serial port
-        #[arg(short, long, default_value = "/dev/ttyUSB0")]
-        port: String,
+        #[arg(short, long)]
+        port: Option<String>,
         /// File to run
         file: PathBuf,
     },
     /// Send a string to device and display response
     Send {
         /// Serial port
-        #[arg(short, long, default_value = "/dev/ttyUSB0")]
-        port: String,
+        #[arg(short, long)]
+        port: Option<String>,
         /// String to send
         data: String,
         /// Timeout in seconds for response (if not specified, waits for prompt)
         #[arg(short, long)]
         timeout: Option<u64>,
     },
+}
+
+/// Resolves the port to use with priority:
+/// 1. Explicit port argument
+/// 2. UPYREMOTE_PORT environment variable
+/// 3. Default /dev/ttyACM0
+fn resolve_port(port: Option<String>) -> String {
+    port.or_else(|| std::env::var(ENV_PORT_VAR).ok())
+        .unwrap_or_else(|| DEFAULT_PORT.to_string())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -1104,10 +1116,12 @@ fn main() -> Result<()> {
 
     match cli.command {
         Commands::Connect { port, baud } => {
+            let port = resolve_port(port);
             let mut device = MpDevice::new(&port, baud)?;
             device.run_repl()?;
         }
         Commands::Ls { port, path } => {
+            let port = resolve_port(port);
             let mut device = MpDevice::new(&port, 115200)?;
             let files = device.list_files(&path)?;
             println!("Files in '{}'", path);
@@ -1116,6 +1130,7 @@ fn main() -> Result<()> {
             }
         }
         Commands::Put { port, source, dest } => {
+            let port = resolve_port(port);
             let mut device = MpDevice::new(&port, 115200)?;
             let remote_path = dest.unwrap_or_else(|| {
                 source
@@ -1127,6 +1142,7 @@ fn main() -> Result<()> {
             device.put_file(&source, &remote_path)?;
         }
         Commands::Get { port, source, dest } => {
+            let port = resolve_port(port);
             let mut device = MpDevice::new(&port, 115200)?;
             let local_path = dest.unwrap_or_else(|| {
                 PathBuf::from(
@@ -1139,11 +1155,13 @@ fn main() -> Result<()> {
             device.get_file(&source, &local_path)?;
         }
         Commands::Exec { port, command } => {
+            let port = resolve_port(port);
             let mut device = MpDevice::new(&port, 115200)?;
             let output = device.exec_command(&command)?;
             print!("{}", output);
         }
         Commands::Reset { port, hard } => {
+            let port = resolve_port(port);
             let mut device = MpDevice::new(&port, 115200)?;
             if hard {
                 device.hard_reset()?;
@@ -1152,6 +1170,7 @@ fn main() -> Result<()> {
             }
         }
         Commands::Run { port, file } => {
+            let port = resolve_port(port);
             let mut device = MpDevice::new(&port, 115200)?;
             let content = std::fs::read_to_string(&file)
                 .with_context(|| format!("Could not read {}", file.display()))?;
@@ -1163,6 +1182,7 @@ fn main() -> Result<()> {
             data,
             timeout,
         } => {
+            let port = resolve_port(port);
             let mut device = MpDevice::new(&port, 115200)?;
             let output = device.send_string(&data, timeout)?;
             print!("{}", output);

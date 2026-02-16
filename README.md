@@ -251,10 +251,35 @@ upyremote exec -p /dev/ttyACM0 "print('Now in REPL mode')"
 
 ## Global Options
 
-- `-p, --port <PORT>`: Serial port (default: `/dev/ttyUSB0`)
-  - Linux: `/dev/ttyUSB0`, `/dev/ttyACM0`
+- `-p, --port <PORT>`: Serial port
+  - Priority order: Explicit argument > Environment variable > Default
+  - Environment variable: `UPYREMOTE_PORT`
+  - Default: `/dev/ttyACM0`
+  - Linux: `/dev/ttyACM0`, `/dev/ttyUSB0`
   - macOS: `/dev/cu.usbserial*`, `/dev/cu.usbmodem*`
   - Windows: `COM3`, `COM4`, etc.
+
+### Using Environment Variable
+
+You can set the `UPYREMOTE_PORT` environment variable to avoid specifying the port every time:
+
+```bash
+# Set the port for the current session
+export UPYREMOTE_PORT=/dev/ttyUSB0
+
+# Now all commands use this port by default
+upyremote ls
+upyremote put main.py
+upyremote get /data/log.txt
+
+# You can still override with -p for specific commands
+upyremote ls -p /dev/ttyACM0
+```
+
+Priority order:
+1. Explicit `-p` argument (highest priority)
+2. `UPYREMOTE_PORT` environment variable
+3. Default `/dev/ttyACM0` (lowest priority)
 
 ## Troubleshooting
 
