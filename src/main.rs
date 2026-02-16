@@ -14,7 +14,7 @@ use std::{
 
 #[derive(Parser)]
 #[command(name = "upyremote")]
-#[command(about = "Herramienta CLI para interactuar con dispositivos MicroPython")]
+#[command(about = "CLI tool for interacting with MicroPython devices")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -22,77 +22,77 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Conecta al dispositivo y abre REPL interactivo
+    /// Connect to device and open interactive REPL
     Connect {
-        /// Puerto serial (ej: /dev/ttyUSB0 o COM3)
+        /// Serial port (e.g., /dev/ttyUSB0 or COM3)
         #[arg(short, long, default_value = "/dev/ttyUSB0")]
         port: String,
-        /// Velocidad en baudios
+        /// Baud rate
         #[arg(short, long, default_value = "115200")]
         baud: u32,
     },
-    /// Lista archivos en el dispositivo
+    /// List files on device
     Ls {
-        /// Puerto serial
+        /// Serial port
         #[arg(short, long, default_value = "/dev/ttyUSB0")]
         port: String,
-        /// Directorio a listar
+        /// Directory to list
         #[arg(default_value = "/")]
         path: String,
     },
-    /// Sube un archivo al dispositivo
+    /// Upload a file to device
     Put {
-        /// Puerto serial
+        /// Serial port
         #[arg(short, long, default_value = "/dev/ttyUSB0")]
         port: String,
-        /// Archivo local
+        /// Local file
         source: PathBuf,
-        /// Destino en el dispositivo (opcional)
+        /// Destination on device (optional)
         dest: Option<String>,
     },
-    /// Descarga un archivo del dispositivo
+    /// Download a file from device
     Get {
-        /// Puerto serial
+        /// Serial port
         #[arg(short, long, default_value = "/dev/ttyUSB0")]
         port: String,
-        /// Archivo en el dispositivo
+        /// File on device
         source: String,
-        /// Destino local (opcional)
+        /// Local destination (optional)
         dest: Option<PathBuf>,
     },
-    /// Ejecuta un comando en el dispositivo
+    /// Execute a command on device
     Exec {
-        /// Puerto serial
+        /// Serial port
         #[arg(short, long, default_value = "/dev/ttyUSB0")]
         port: String,
-        /// Comando a ejecutar
+        /// Command to execute
         command: String,
     },
-    /// Reinicia el dispositivo
+    /// Reset device
     Reset {
-        /// Puerto serial
+        /// Serial port
         #[arg(short, long, default_value = "/dev/ttyUSB0")]
         port: String,
-        /// Reinicio completo (hard reset)
+        /// Hard reset (complete reset)
         #[arg(short = 'H', long)]
         hard: bool,
     },
-    /// Ejecuta un archivo Python en el dispositivo
+    /// Run a Python file on device
     Run {
-        /// Puerto serial
+        /// Serial port
         #[arg(short, long, default_value = "/dev/ttyUSB0")]
         port: String,
-        /// Archivo a ejecutar
+        /// File to run
         file: PathBuf,
     },
-    /// Envía una cadena al dispositivo y muestra la respuesta
+    /// Send a string to device and display response
     Send {
-        /// Puerto serial
+        /// Serial port
         #[arg(short, long, default_value = "/dev/ttyUSB0")]
         port: String,
-        /// Cadena a enviar
+        /// String to send
         data: String,
-        /// Tiempo de espera en segundos para la respuesta (si no se especifica, espera al prompt " $: ")
+        /// Timeout in seconds for response (if not specified, waits for prompt " $: ")
         #[arg(short, long)]
         timeout: Option<u64>,
     },
@@ -111,7 +111,7 @@ impl MpDevice {
             .flow_control(FlowControl::None)
             .timeout(Duration::from_millis(100))
             .open()
-            .with_context(|| format!("No se pudo abrir el puerto {}", port_name))?;
+            .with_context(|| format!("Could not open port {}", port_name))?;
 
         Ok(MpDevice { port })
     }
@@ -156,36 +156,36 @@ impl MpDevice {
     }
 
     fn enter_raw_repl(&mut self) -> Result<()> {
-        // Limpiar buffer entrante
+        // Clear input buffer
         let mut discard = [0u8; 1024];
         let _ = self.port.read(&mut discard);
 
-        // Ctrl-C para interrumpir cualquier programa
+        // Ctrl-C to interrupt any running program
         self.write(&[0x03, 0x03])?;
         thread::sleep(Duration::from_millis(200));
 
-        // Ctrl-A para entrar en raw REPL
+        // Ctrl-A to enter raw REPL
         self.write(&[0x01])?;
         thread::sleep(Duration::from_millis(200));
 
-        // Leer prompt
+        // Read prompt
         let mut buf = vec![];
         if self.read_until(b">>>", &mut buf, 1000)? {
-            // Verificar que estamos en raw mode
+            // Verify we are in raw mode
             let response = String::from_utf8_lossy(&buf);
             if response.contains("raw REPL") || response.contains("CTRL-B") {
                 return Ok(());
             }
         }
 
-        // Intentar nuevamente
+        // Try again
         self.write(&[0x01])?;
         thread::sleep(Duration::from_millis(500));
         Ok(())
     }
 
     fn exit_raw_repl(&mut self) -> Result<()> {
-        // Ctrl-B para salir de raw REPL
+        // Ctrl-B to exit raw REPL
         self.write(&[0x02])?;
         thread::sleep(Duration::from_millis(200));
         Ok(())
@@ -194,33 +194,33 @@ impl MpDevice {
     fn exec_command(&mut self, code: &str) -> Result<String> {
         self.enter_raw_repl()?;
 
-        // Enviar código
+        // Send code
         let code_bytes = code.as_bytes();
 
-        // Enviar en chunks
+        // Send in chunks
         for chunk in code_bytes.chunks(256) {
             self.write(chunk)?;
             thread::sleep(Duration::from_millis(50));
         }
 
-        // Ctrl-D para ejecutar
+        // Ctrl-D to execute
         self.write(&[0x04])?;
 
-        // Leer respuesta
+        // Read response
         let mut response = vec![];
         self.read_until(b"\x04>", &mut response, 5000)?;
 
         self.exit_raw_repl()?;
 
-        // Parsear respuesta
+        // Parse response
         let output = String::from_utf8_lossy(&response);
 
-        // Buscar entre los markers OK y \x04
+        // Look between OK and \x04 markers
         if let Some(start) = output.find("OK") {
             let rest = &output[start + 2..];
             if let Some(end) = rest.find('\x04') {
                 let result = &rest[..end];
-                // Limpiar output
+                // Clean output
                 return Ok(result.trim().to_string());
             }
         }
@@ -252,17 +252,17 @@ except OSError as e:
 
     fn put_file(&mut self, local_path: &PathBuf, remote_path: &str) -> Result<()> {
         let content = std::fs::read(local_path)
-            .with_context(|| format!("No se pudo leer {}", local_path.display()))?;
+            .with_context(|| format!("Could not read {}", local_path.display()))?;
 
-        // Verificar tamaño
+        // Check size
         if content.len() > 10000 {
             println!(
-                "Archivo grande ({} bytes), subiendo en partes...",
+                "Large file ({} bytes), uploading in parts...",
                 content.len()
             );
         }
 
-        // Codificar contenido en base64
+        // Encode content in base64
         let b64_content = base64_encode(&content);
 
         let cmd = format!(
@@ -278,14 +278,14 @@ print('OK')"#,
 
         if result.contains("OK") || result.is_empty() || result.lines().any(|l| l.contains("OK")) {
             println!(
-                "✓ Archivo '{}' subido a '{}' ({} bytes)",
+                "✓ File '{}' uploaded to '{}' ({} bytes)",
                 local_path.display(),
                 remote_path,
                 content.len()
             );
             Ok(())
         } else {
-            anyhow::bail!("Error al subir archivo: {}", result)
+            anyhow::bail!("Error uploading file: {}", result)
         }
     }
 
@@ -304,10 +304,10 @@ except OSError as e:
         let output = self.exec_command(&cmd)?;
 
         if output.contains("Error:") {
-            anyhow::bail!("Error al leer archivo remoto: {}", output);
+            anyhow::bail!("Error reading remote file: {}", output);
         }
 
-        // Extraer base64 de la salida
+        // Extract base64 from output
         let b64_data: String = output
             .lines()
             .map(|s| s.trim())
@@ -315,16 +315,16 @@ except OSError as e:
             .collect();
 
         if b64_data.is_empty() {
-            anyhow::bail!("No se pudo leer el archivo '{}'", remote_path);
+            anyhow::bail!("Could not read file '{}'", remote_path);
         }
 
         let content = base64_decode(&b64_data)?;
         let content_len = content.len();
         std::fs::write(local_path, &content)
-            .with_context(|| format!("No se pudo escribir {}", local_path.display()))?;
+            .with_context(|| format!("Could not write {}", local_path.display()))?;
 
         println!(
-            "✓ Archivo '{}' descargado a '{}' ({} bytes)",
+            "✓ File '{}' downloaded to '{}' ({} bytes)",
             remote_path,
             local_path.display(),
             content_len
@@ -333,16 +333,16 @@ except OSError as e:
     }
 
     fn soft_reset(&mut self) -> Result<()> {
-        // Ctrl-D hace soft reset en MicroPython
+        // Ctrl-D performs soft reset in MicroPython
         self.write(&[0x04])?;
         thread::sleep(Duration::from_millis(1000));
-        println!("✓ Soft reset realizado");
+        println!("✓ Soft reset performed");
         Ok(())
     }
 
     fn hard_reset(&mut self) -> Result<()> {
-        // Alternar DTR/RTS para hard reset en muchos boards ESP32
-        println!("Realizando hard reset (DTR/RTS)...");
+        // Toggle DTR/RTS for hard reset on many ESP32 boards
+        println!("Performing hard reset (DTR/RTS)...");
         self.port.write_data_terminal_ready(true)?;
         self.port.write_request_to_send(false)?;
         thread::sleep(Duration::from_millis(100));
@@ -351,36 +351,36 @@ except OSError as e:
         thread::sleep(Duration::from_millis(100));
         self.port.write_request_to_send(false)?;
         thread::sleep(Duration::from_millis(1000));
-        println!("✓ Hard reset realizado");
+        println!("✓ Hard reset performed");
         Ok(())
     }
 
     fn send_string(&mut self, data: &str, timeout_secs: Option<u64>) -> Result<String> {
-        // Limpiar buffer de entrada
+        // Clear input buffer
         let mut discard = [0u8; 1024];
         let _ = self.port.read(&mut discard);
 
-        // Enviar la cadena
+        // Send string
         self.write(data.as_bytes())?;
 
-        // Si no termina en newline, añadirlo
+        // If doesn't end with newline, add it
         if !data.ends_with('\n') && !data.ends_with('\r') {
             self.write(b"\r")?;
         }
 
-        // Leer respuesta
+        // Read response
         let mut response = Vec::new();
         let mut buf = [0u8; 1024];
         let start = std::time::Instant::now();
         const LINUX_PROMPT: &[u8] = b" $: ";
         const MP_PROMPT: &[u8] = b">>>";
-        const DEFAULT_TIMEOUT: u64 = 30; // 30 segundos máximo si no se especifica timeout
+        const DEFAULT_TIMEOUT: u64 = 30; // 30 seconds max if timeout not specified
 
         let timeout = timeout_secs.unwrap_or(DEFAULT_TIMEOUT);
         let wait_for_prompt = timeout_secs.is_none();
 
         loop {
-            // Verificar timeout
+            // Check timeout
             if start.elapsed().as_secs() >= timeout {
                 break;
             }
@@ -389,7 +389,7 @@ except OSError as e:
                 Ok(n) if n > 0 => {
                     response.extend_from_slice(&buf[..n]);
 
-                    // Si estamos esperando el prompt, verificar si recibimos alguno
+                    // If waiting for prompt, check if we received one
                     if wait_for_prompt {
                         let has_linux_prompt = response
                             .windows(LINUX_PROMPT.len())
@@ -398,9 +398,9 @@ except OSError as e:
                             response.windows(MP_PROMPT.len()).any(|w| w == MP_PROMPT);
 
                         if has_linux_prompt || has_mp_prompt {
-                            // Dar un poco más de tiempo por si hay más datos
+                            // Give a bit more time in case there's more data
                             thread::sleep(Duration::from_millis(100));
-                            // Intentar leer cualquier dato adicional
+                            // Try to read any additional data
                             let mut extra_buf = [0u8; 256];
                             if let Ok(n) = self.port.read(&mut extra_buf) {
                                 if n > 0 {
@@ -414,9 +414,9 @@ except OSError as e:
                 Ok(_) => {}
                 Err(e) if e.kind() == io::ErrorKind::TimedOut => {
                     if !response.is_empty() && !wait_for_prompt {
-                        // Si ya recibimos algo y no esperamos prompt, dar un poco más de tiempo
+                        // If we already received something and not waiting for prompt, give a bit more time
                         thread::sleep(Duration::from_millis(100));
-                        // Verificar si hay más datos
+                        // Check if there's more data
                         match self.port.read(&mut buf) {
                             Ok(n) if n > 0 => {
                                 response.extend_from_slice(&buf[..n]);
@@ -436,18 +436,18 @@ except OSError as e:
     }
 
     fn run_repl(&mut self) -> Result<()> {
-        // Verificar si estamos en un terminal interactivo
+        // Check if we are in an interactive terminal
         let is_tty = atty::is(atty::Stream::Stdin);
 
         if !is_tty {
-            println!("Modo no interactivo detectado. Usando modo script.");
-            println!("Escribe comandos y presiona Ctrl+D para enviar, Ctrl+C para salir.");
+            println!("Non-interactive mode detected. Using script mode.");
+            println!("Type commands and press Ctrl+D to send, Ctrl+C to exit.");
 
-            // Enviar Ctrl-C para interrumpir cualquier programa
+            // Send Ctrl-C to interrupt any running program
             self.write(&[0x03])?;
             thread::sleep(Duration::from_millis(100));
 
-            // Leer cualquier dato pendiente
+            // Read any pending data
             let mut initial_buf = [0u8; 1024];
             if let Ok(n) = self.read_available(&mut initial_buf) {
                 if n > 0 {
@@ -456,14 +456,14 @@ except OSError as e:
                 }
             }
 
-            // Modo script: leer líneas de stdin
+            // Script mode: read lines from stdin
             let stdin = io::stdin();
             let mut stdout = io::stdout();
             let mut serial_buf = [0u8; 1024];
             let mut line = String::new();
 
             loop {
-                // Leer del puerto serial
+                // Read from serial port
                 match self.read_available(&mut serial_buf) {
                     Ok(n) if n > 0 => {
                         stdout.write_all(&serial_buf[..n])?;
@@ -473,7 +473,7 @@ except OSError as e:
                     Err(_) => break,
                 }
 
-                // Leer de stdin (no bloqueante)
+                // Read from stdin (non-blocking)
                 use std::io::BufRead;
                 let mut stdin_lock = stdin.lock();
                 if let Ok(n) = stdin_lock.read_line(&mut line) {
@@ -490,21 +490,21 @@ except OSError as e:
             return Ok(());
         }
 
-        // Modo interactivo con raw terminal
-        println!("Conectado al dispositivo. Presiona Ctrl+X para salir.");
-        println!("Usa flechas arriba/abajo para historial de comandos.");
+        // Interactive mode with raw terminal
+        println!("Connected to device. Press Ctrl+X to exit.");
+        println!("Use up/down arrows for command history.");
         println!("MicroPython REPL ---");
         println!();
 
-        // Enviar Ctrl-C para interrumpir cualquier programa en ejecución
+        // Send Ctrl-C to interrupt any running program
         self.write(&[0x03])?;
         thread::sleep(Duration::from_millis(100));
 
-        // Enviar Ctrl-B para asegurar que estamos en modo normal (no raw)
+        // Send Ctrl-B to ensure we are in normal mode (not raw)
         self.write(&[0x02])?;
         thread::sleep(Duration::from_millis(100));
 
-        // Leer cualquier dato pendiente
+        // Read any pending data
         let mut initial_buf = [0u8; 1024];
         if let Ok(n) = self.read_available(&mut initial_buf) {
             if n > 0 {
@@ -513,10 +513,10 @@ except OSError as e:
             }
         }
 
-        // Configurar terminal
+        // Configure terminal
         if let Err(e) = enable_raw_mode() {
-            eprintln!("Advertencia: No se pudo configurar modo raw: {}", e);
-            eprintln!("Continuando en modo linea...");
+            eprintln!("Warning: Could not configure raw mode: {}", e);
+            eprintln!("Continuing in line mode...");
         }
 
         let mut stdout = io::stdout();
@@ -525,7 +525,7 @@ except OSError as e:
         let result: Result<()> = (|| {
             let mut running = true;
             while running {
-                // Leer datos del puerto serial (no bloqueante)
+                // Read data from serial port (non-blocking)
                 match self.read_available(&mut serial_buf) {
                     Ok(n) if n > 0 => {
                         stdout.write_all(&serial_buf[..n])?;
@@ -533,22 +533,22 @@ except OSError as e:
                     }
                     Ok(_) => {}
                     Err(e) => {
-                        eprintln!("Error leyendo serial: {}", e);
+                        eprintln!("Error reading serial: {}", e);
                         break;
                     }
                 }
 
-                // Leer entrada del usuario
+                // Read user input
                 if event::poll(Duration::from_millis(5))? {
                     if let Event::Key(key) = event::read()? {
                         match key.code {
-                            // Ctrl+X para salir (antes que el caso general de Char)
+                            // Ctrl+X to exit (before general Char case)
                             KeyCode::Char('x') | KeyCode::Char('X')
                                 if key.modifiers.contains(KeyModifiers::CONTROL) =>
                             {
                                 running = false;
                             }
-                            // Ctrl+C (interrumpir)
+                            // Ctrl+C (interrupt)
                             KeyCode::Char('c') | KeyCode::Char('C')
                                 if key.modifiers.contains(KeyModifiers::CONTROL) =>
                             {
@@ -560,40 +560,40 @@ except OSError as e:
                             {
                                 self.write(&[0x04])?;
                             }
-                            // Ctrl+A (inicio de línea)
+                            // Ctrl+A (beginning of line)
                             KeyCode::Char('a') | KeyCode::Char('A')
                                 if key.modifiers.contains(KeyModifiers::CONTROL) =>
                             {
                                 self.write(&[0x01])?;
                             }
-                            // Ctrl+E (fin de línea)
+                            // Ctrl+E (end of line)
                             KeyCode::Char('e') | KeyCode::Char('E')
                                 if key.modifiers.contains(KeyModifiers::CONTROL) =>
                             {
                                 self.write(&[0x05])?;
                             }
-                            // Ctrl+K (borrar hasta final de línea)
+                            // Ctrl+K (delete to end of line)
                             KeyCode::Char('k') | KeyCode::Char('K')
                                 if key.modifiers.contains(KeyModifiers::CONTROL) =>
                             {
                                 self.write(&[0x0b])?;
                             }
-                            // Ctrl+U (borrar línea completa)
+                            // Ctrl+U (delete entire line)
                             KeyCode::Char('u') | KeyCode::Char('U')
                                 if key.modifiers.contains(KeyModifiers::CONTROL) =>
                             {
                                 self.write(&[0x15])?;
                             }
-                            // Ctrl+W (borrar palabra anterior)
+                            // Ctrl+W (delete previous word)
                             KeyCode::Char('w') | KeyCode::Char('W')
                                 if key.modifiers.contains(KeyModifiers::CONTROL) =>
                             {
                                 self.write(&[0x17])?;
                             }
-                            // Caracteres normales (incluyendo otros controles)
+                            // Normal characters (including other controls)
                             KeyCode::Char(c) => {
                                 if key.modifiers.contains(KeyModifiers::CONTROL) {
-                                    // Enviar caracteres de control (Ctrl+A = 0x01, etc.)
+                                    // Send control characters (Ctrl+A = 0x01, etc.)
                                     let ctrl_char = (c as u8) & 0x1f;
                                     self.write(&[ctrl_char])?;
                                 } else {
@@ -612,15 +612,15 @@ except OSError as e:
                             KeyCode::Tab => {
                                 self.write(b"\t")?;
                             }
-                            // Flecha Arriba - Historial anterior
+                            // Arrow Up - Previous history
                             KeyCode::Up => {
                                 self.write(&[0x1b, 0x5b, 0x41])?;
                             }
-                            // Flecha Abajo - Historial siguiente
+                            // Arrow Down - Next history
                             KeyCode::Down => {
                                 self.write(&[0x1b, 0x5b, 0x42])?;
                             }
-                            // Flecha Derecha (Ctrl+Right = salto de palabra adelante)
+                            // Arrow Right (Ctrl+Right = jump word forward)
                             KeyCode::Right => {
                                 if key.modifiers.contains(KeyModifiers::CONTROL) {
                                     // Ctrl+Right: ESC[1;5C
@@ -629,7 +629,7 @@ except OSError as e:
                                     self.write(&[0x1b, 0x5b, 0x43])?;
                                 }
                             }
-                            // Flecha Izquierda (Ctrl+Left = salto de palabra atrás)
+                            // Arrow Left (Ctrl+Left = jump word backward)
                             KeyCode::Left => {
                                 if key.modifiers.contains(KeyModifiers::CONTROL) {
                                     // Ctrl+Left: ESC[1;5D
@@ -663,13 +663,13 @@ except OSError as e:
         })();
 
         let _ = disable_raw_mode();
-        println!("\nSaliendo del REPL...");
+        println!("\nExiting REPL...");
 
         result
     }
 }
 
-// Implementación simple de base64
+// Simple base64 implementation
 fn base64_encode(data: &[u8]) -> String {
     const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut result = String::with_capacity((data.len() + 2) / 3 * 4);
@@ -751,7 +751,7 @@ fn main() -> Result<()> {
         Commands::Ls { port, path } => {
             let mut device = MpDevice::new(&port, 115200)?;
             let files = device.list_files(&path)?;
-            println!("Archivos en '{}'", path);
+            println!("Files in '{}'", path);
             for file in files {
                 println!("  {}", file);
             }
@@ -795,7 +795,7 @@ fn main() -> Result<()> {
         Commands::Run { port, file } => {
             let mut device = MpDevice::new(&port, 115200)?;
             let content = std::fs::read_to_string(&file)
-                .with_context(|| format!("No se pudo leer {}", file.display()))?;
+                .with_context(|| format!("Could not read {}", file.display()))?;
             let output = device.exec_command(&content)?;
             print!("{}", output);
         }

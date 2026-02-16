@@ -1,202 +1,202 @@
 # upyremote
 
-Herramienta CLI en Rust para interactuar con dispositivos MicroPython, inspirada en mpremote.
+Rust CLI tool for interacting with MicroPython devices, inspired by mpremote.
 
-## Características
+## Features
 
-- **Conexión REPL interactiva**: Conecta directamente al REPL de MicroPython con soporte para historial y edición de línea
-- **Transferencia de archivos**: Sube y descarga archivos usando codificación base64
-- **Ejecución de comandos**: Ejecuta comandos Python de forma remota
-- **Gestión del dispositivo**: Reinicio soft y hard del dispositivo
-- **Modo script**: Compatible con pipes y redirección
-- **Soporte multi-plataforma**: Funciona en Linux, macOS y Windows
+- **Interactive REPL Connection**: Connect directly to MicroPython REPL with support for history and line editing
+- **File Transfer**: Upload and download files using base64 encoding
+- **Command Execution**: Execute Python commands remotely
+- **Device Management**: Soft and hard reset of the device
+- **Script Mode**: Compatible with pipes and redirection
+- **Cross-platform**: Works on Linux, macOS, and Windows
 
-## Instalación
+## Installation
 
-### Desde código fuente
+### From Source
 
 ```bash
-git clone <url-del-repositorio>
+git clone <repository-url>
 cd upyremote
 cargo build --release
 ```
 
-El binario compilado estará en `./target/release/upyremote`
+The compiled binary will be at `./target/release/upyremote`
 
-### Requisitos
+### Requirements
 
-- Rust 1.70 o superior
-- Acceso al puerto serial (usualmente requiere pertenecer al grupo `dialout` en Linux)
+- Rust 1.70 or higher
+- Serial port access (usually requires belonging to the `dialout` group on Linux)
 
-## Uso
+## Usage
 
-### Comandos disponibles
+### Available Commands
 
-#### `connect` - Conexión REPL interactiva
+#### `connect` - Interactive REPL Connection
 
 ```bash
 upyremote connect -p /dev/ttyACM0
 ```
 
-Abre una sesión REPL interactiva con el dispositivo. Presiona `Ctrl+X` para salir.
+Opens an interactive REPL session with the device. Press `Ctrl+X` to exit.
 
-**Atajos de teclado en modo REPL:**
+**Keyboard shortcuts in REPL mode:**
 
-| Atajo | Acción |
-|-------|--------|
-| `Ctrl+X` | Salir del REPL |
-| `Ctrl+C` | Interrumpir programa en ejecución |
+| Shortcut | Action |
+|----------|--------|
+| `Ctrl+X` | Exit REPL |
+| `Ctrl+C` | Interrupt running program |
 | `Ctrl+D` | EOF / Soft reset |
-| `Ctrl+A` | Ir al inicio de línea |
-| `Ctrl+E` | Ir al final de línea |
-| `Ctrl+K` | Borrar hasta final de línea |
-| `Ctrl+U` | Borrar línea completa |
-| `Ctrl+W` | Borrar palabra anterior |
-| `Ctrl+←` | Saltar palabra atrás |
-| `Ctrl+→` | Saltar palabra adelante |
-| `↑` / `↓` | Navegar historial de comandos |
-| `←` / `→` | Mover cursor |
-| `Home` / `End` | Ir a inicio/fin de línea |
-| `Delete` | Borrar carácter bajo cursor |
+| `Ctrl+A` | Go to beginning of line |
+| `Ctrl+E` | Go to end of line |
+| `Ctrl+K` | Delete to end of line |
+| `Ctrl+U` | Delete entire line |
+| `Ctrl+W` | Delete previous word |
+| `Ctrl+←` | Jump word backward |
+| `Ctrl+→` | Jump word forward |
+| `↑` / `↓` | Navigate command history |
+| `←` / `→` | Move cursor |
+| `Home` / `End` | Go to beginning/end of line |
+| `Delete` | Delete character under cursor |
 
-#### `ls` - Listar archivos
+#### `ls` - List Files
 
 ```bash
-upyremote ls -p /dev/ttyACM0 /ruta/directorio
+upyremote ls -p /dev/ttyACM0 /path/directory
 ```
 
-Lista los archivos en el directorio especificado del dispositivo.
+Lists files in the specified directory on the device.
 
-#### `put` - Subir archivo
+#### `put` - Upload File
 
 ```bash
-upyremote put -p /dev/ttyACM0 archivo_local.py /ruta/remota/archivo.py
+upyremote put -p /dev/ttyACM0 local_file.py /remote/path/file.py
 ```
 
-Sube un archivo local al dispositivo. Si no se especifica destino, usa el nombre del archivo local.
+Uploads a local file to the device. If destination is not specified, uses the local filename.
 
-#### `get` - Descargar archivo
+#### `get` - Download File
 
 ```bash
-upyremote get -p /dev/ttyACM0 /ruta/remota/archivo.py archivo_local.py
+upyremote get -p /dev/ttyACM0 /remote/path/file.py local_file.py
 ```
 
-Descarga un archivo del dispositivo. Si no se especifica destino local, usa el nombre del archivo remoto.
+Downloads a file from the device. If local destination is not specified, uses the remote filename.
 
-#### `exec` - Ejecutar comando Python
+#### `exec` - Execute Python Command
 
 ```bash
-upyremote exec -p /dev/ttyACM0 "print('Hola Mundo')"
+upyremote exec -p /dev/ttyACM0 "print('Hello World')"
 upyremote exec -p /dev/ttyACM0 "import os; print(os.listdir('/'))"
 ```
 
-Ejecuta código Python en el dispositivo usando el protocolo raw REPL.
+Executes Python code on the device using the raw REPL protocol.
 
-#### `run` - Ejecutar archivo Python
+#### `run` - Run Python File
 
 ```bash
 upyremote run -p /dev/ttyACM0 script.py
 ```
 
-Lee un archivo Python local y lo ejecuta en el dispositivo.
+Reads a local Python file and executes it on the device.
 
-#### `send` - Enviar cadena de texto
+#### `send` - Send Text String
 
 ```bash
-# Espera automáticamente al prompt (>>> o $:)
-upyremote send -p /dev/ttyACM0 "print('Hola')"
+# Automatically waits for prompt (>>> or $:)
+upyremote send -p /dev/ttyACM0 "print('Hello')"
 
-# Con timeout específico (en segundos)
-upyremote send -p /dev/ttyACM0 "comando" -t 5
+# With specific timeout (in seconds)
+upyremote send -p /dev/ttyACM0 "command" -t 5
 ```
 
-Envía una cadena de texto directamente al puerto serial y muestra la respuesta. 
-- Sin `-t`: Espera hasta recibir el prompt del dispositivo
-- Con `-t`: Lee durante el tiempo especificado
+Sends a text string directly to the serial port and displays the response.
+- Without `-t`: Waits until the device prompt is received
+- With `-t`: Reads for the specified duration
 
-#### `reset` - Reiniciar dispositivo
+#### `reset` - Reset Device
 
 ```bash
-# Soft reset (Ctrl+D en MicroPython)
+# Soft reset (Ctrl+D in MicroPython)
 upyremote reset -p /dev/ttyACM0
 
-# Hard reset (alterna señales DTR/RTS)
+# Hard reset (toggles DTR/RTS signals)
 upyremote reset -p /dev/ttyACM0 -H
 ```
 
-## Ejemplos de uso
+## Usage Examples
 
-### Conexión básica
+### Basic Connection
 
 ```bash
-# Conectar al REPL
+# Connect to REPL
 upyremote connect -p /dev/ttyACM0
 
-# En el REPL, puedes usar:
-# >>> print("Hola")
+# In the REPL, you can use:
+# >>> print("Hello")
 # >>> import os
 # >>> os.listdir('/')
 ```
 
-### Gestión de archivos
+### File Management
 
 ```bash
-# Subir un script
+# Upload a script
 upyremote put -p /dev/ttyACM0 main.py
 
-# Descargar un archivo de log
+# Download a log file
 upyremote get -p /dev/ttyACM0 /log.txt backup_log.txt
 
-# Ver archivos en el directorio raíz
+# View files in root directory
 upyremote ls -p /dev/ttyACM0 /
 ```
 
-### Ejecución de comandos
+### Command Execution
 
 ```bash
-# Ejecutar código simple
+# Execute simple code
 upyremote exec -p /dev/ttyACM0 "print(2+2)"
 
-# Ver información del sistema
+# View system information
 upyremote exec -p /dev/ttyACM0 "import sys; print(sys.version)"
 
-# Listar archivos
+# List files
 upyremote exec -p /dev/ttyACM0 "import os; print(os.listdir('/'))"
 ```
 
-### Uso en scripts
+### Script Usage
 
 ```bash
-# Enviar múltiples comandos
+# Send multiple commands
 echo -e "x = 100\nprint(x)" | upyremote connect -p /dev/ttyACM0
 
-# Automatizar tareas
+# Automate tasks
 upyremote send -p /dev/ttyACM0 "import machine; machine.freq()" -t 2
 ```
 
-## Opciones globales
+## Global Options
 
-Cada comando acepta las siguientes opciones:
+Each command accepts the following options:
 
-- `-p, --port <PORT>`: Puerto serial (default: `/dev/ttyUSB0`)
+- `-p, --port <PORT>`: Serial port (default: `/dev/ttyUSB0`)
   - Linux: `/dev/ttyUSB0`, `/dev/ttyACM0`
   - macOS: `/dev/cu.usbserial*`, `/dev/cu.usbmodem*`
   - Windows: `COM3`, `COM4`, etc.
 
-## Solución de problemas
+## Troubleshooting
 
-### Permiso denegado al acceder al puerto
+### Permission denied accessing port
 
-En Linux, añade tu usuario al grupo `dialout`:
+On Linux, add your user to the `dialout` group:
 
 ```bash
 sudo usermod -a -G dialout $USER
-# Cerrar sesión y volver a iniciar
+# Log out and log back in
 ```
 
-### Dispositivo no encontrado
+### Device not found
 
-Verifica que el dispositivo esté conectado:
+Verify that the device is connected:
 
 ```bash
 # Linux
@@ -206,53 +206,52 @@ ls -la /dev/ttyACM* /dev/ttyUSB*
 ls -la /dev/cu.*
 ```
 
-### Puerto ocupado
+### Port busy
 
-Si recibes "Device or resource busy", verifica que no haya otro proceso usando el puerto:
+If you receive "Device or resource busy", check that no other process is using the port:
 
 ```bash
 lsof /dev/ttyACM0
-# o
+# or
 fuser /dev/ttyACM0
 ```
 
-## Desarrollo
+## Development
 
-### Compilar en modo debug
+### Compile in debug mode
 
 ```bash
 cargo build
 ```
 
-### Compilar en modo release (optimizado)
+### Compile in release mode (optimized)
 
 ```bash
 cargo build --release
 ```
 
-### Ejecutar tests
+### Run tests
 
 ```bash
 cargo test
 ```
 
-## Arquitectura
+## Architecture
 
-El proyecto utiliza:
-- **clap**: Parser de argumentos de línea de comandos
-- **serialport**: Comunicación serial multiplataforma
-- **crossterm**: Manejo de terminal en modo raw para el REPL interactivo
-- **anyhow**: Manejo de errores
+The project uses:
+- **clap**: Command line argument parser
+- **serialport**: Cross-platform serial communication
+- **crossterm**: Raw terminal handling for interactive REPL
+- **anyhow**: Error handling
 
-## Licencia
+## License
 
-MIT License - Ver LICENSE para más detalles.
+MIT License - See LICENSE for details.
 
-## Contribuciones
+## Contributing
 
-Las contribuciones son bienvenidas. Por favor, abre un issue o pull request.
+Contributions are welcome. Please open an issue or pull request.
 
-## Agradecimientos
+## Acknowledgments
 
-Inspirado en [mpremote](https://docs.micropython.org/en/latest/reference/mpremote.html), la herramienta oficial de MicroPython.
-# upyremote
+Inspired by [mpremote](https://docs.micropython.org/en/latest/reference/mpremote.html), the official MicroPython tool.
