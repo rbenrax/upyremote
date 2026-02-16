@@ -92,14 +92,40 @@ enum Commands {
         port: String,
         /// String to send
         data: String,
-        /// Timeout in seconds for response (if not specified, waits for prompt " $: ")
+        /// Timeout in seconds for response (if not specified, waits for prompt)
         #[arg(short, long)]
         timeout: Option<u64>,
     },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum DeviceMode {
+    MicroPythonRepl,
+    UpyOS,
+    Unknown,
+}
+
+impl DeviceMode {
+    fn is_repl_compatible(&self) -> bool {
+        matches!(self, DeviceMode::MicroPythonRepl)
+    }
+
+    fn is_upyos_compatible(&self) -> bool {
+        matches!(self, DeviceMode::UpyOS)
+    }
+
+    fn description(&self) -> &'static str {
+        match self {
+            DeviceMode::MicroPythonRepl => "MicroPython REPL",
+            DeviceMode::UpyOS => "upyOS (Linux-like shell)",
+            DeviceMode::Unknown => "Unknown mode",
+        }
+    }
+}
+
 struct MpDevice {
     port: Box<dyn serialport::SerialPort>,
+    mode: DeviceMode,
 }
 
 impl MpDevice {
@@ -113,7 +139,114 @@ impl MpDevice {
             .open()
             .with_context(|| format!("Could not open port {}", port_name))?;
 
-        Ok(MpDevice { port })
+        let mut device = MpDevice {
+            port,
+            mode: DeviceMode::Unknown,
+        };
+
+        // Detect device mode
+        device.detect_mode()?;
+
+        Ok(device)
+    }
+
+    fn detect_mode(&mut self) -> Result<()> {
+        // Clear input buffer
+        let mut discard = [0u8; 1024];
+        let _ = self.port.read(&mut discard);
+
+        // Send Enter to get a prompt
+        self.write(b"\r")?;
+        thread::sleep(Duration::from_millis(200));
+
+        // Read response
+        let mut buf = vec![];
+        let mut temp_buf = [0u8; 1024];
+        let start = std::time::Instant::now();
+
+        while start.elapsed().as_millis() < 1000 {
+            match self.port.read(&mut temp_buf) {
+                Ok(n) if n > 0 => {
+                    buf.extend_from_slice(&temp_buf[..n]);
+                }
+                Ok(_) => {}
+                Err(_) => break,
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        let response = String::from_utf8_lossy(&buf);
+
+        // Detect mode based on prompt
+        if response.contains(">>>") {
+            self.mode = DeviceMode::MicroPythonRepl;
+            println!("[INFO] Detected mode: {}", self.mode.description());
+        } else if response.contains("/ $:") || response.contains("$") {
+            // Try to confirm upyOS by checking version
+            self.write(b"echo $SHELL\r")?;
+            thread::sleep(Duration::from_millis(200));
+
+            let mut confirm_buf = vec![];
+            let start = std::time::Instant::now();
+            while start.elapsed().as_millis() < 500 {
+                match self.port.read(&mut temp_buf) {
+                    Ok(n) if n > 0 => {
+                        confirm_buf.extend_from_slice(&temp_buf[..n]);
+                    }
+                    Ok(_) => {}
+                    Err(_) => break,
+                }
+                thread::sleep(Duration::from_millis(10));
+            }
+
+            let confirm_response = String::from_utf8_lossy(&confirm_buf);
+            if confirm_response.contains("/bin/sh")
+                || confirm_response.contains("$SHELL")
+                || confirm_response.contains("/ $:")
+            {
+                self.mode = DeviceMode::UpyOS;
+                println!("[INFO] Detected mode: {}", self.mode.description());
+            } else {
+                self.mode = DeviceMode::Unknown;
+                println!(
+                    "[WARNING] Could not detect device mode. Some features may not work correctly."
+                );
+            }
+        } else {
+            self.mode = DeviceMode::Unknown;
+            println!(
+                "[WARNING] Could not detect device mode. Some features may not work correctly."
+            );
+        }
+
+        Ok(())
+    }
+
+    fn ensure_repl_mode(&self) -> Result<()> {
+        if self.mode == DeviceMode::Unknown {
+            anyhow::bail!("Device mode is unknown. This command requires MicroPython REPL mode.");
+        }
+        if !self.mode.is_repl_compatible() {
+            anyhow::bail!(
+                "This command requires MicroPython REPL mode, but device is in {} mode.\n\
+                 Use 'upyremote send' command for upyOS operations or restart device to MicroPython mode.",
+                self.mode.description()
+            );
+        }
+        Ok(())
+    }
+
+    fn ensure_upyos_mode(&self) -> Result<()> {
+        if self.mode == DeviceMode::Unknown {
+            anyhow::bail!("Device mode is unknown. This command requires upyOS mode.");
+        }
+        if !self.mode.is_upyos_compatible() {
+            anyhow::bail!(
+                "This command requires upyOS mode, but device is in {} mode.",
+                self.mode.description()
+            );
+        }
+        Ok(())
     }
 
     fn write(&mut self, data: &[u8]) -> Result<()> {
@@ -192,6 +325,7 @@ impl MpDevice {
     }
 
     fn exec_command(&mut self, code: &str) -> Result<String> {
+        self.ensure_repl_mode()?;
         self.enter_raw_repl()?;
 
         // Send code
@@ -229,6 +363,17 @@ impl MpDevice {
     }
 
     fn list_files(&mut self, path: &str) -> Result<Vec<String>> {
+        match self.mode {
+            DeviceMode::MicroPythonRepl => self.list_files_repl(path),
+            DeviceMode::UpyOS => self.list_files_upyos(path),
+            DeviceMode::Unknown => {
+                // Try REPL mode first
+                self.list_files_repl(path)
+            }
+        }
+    }
+
+    fn list_files_repl(&mut self, path: &str) -> Result<Vec<String>> {
         let cmd = format!(
             r#"import os
 try:
@@ -250,7 +395,53 @@ except OSError as e:
         Ok(files)
     }
 
+    fn list_files_upyos(&mut self, path: &str) -> Result<Vec<String>> {
+        self.ensure_upyos_mode()?;
+
+        let cmd = format!("ls -1 {}\r", path);
+        self.write(cmd.as_bytes())?;
+
+        // Read response until prompt
+        let mut response = Vec::new();
+        let mut buf = [0u8; 1024];
+        let start = std::time::Instant::now();
+        const PROMPT: &[u8] = b"$:";
+
+        while start.elapsed().as_secs() < 5 {
+            match self.port.read(&mut buf) {
+                Ok(n) if n > 0 => {
+                    response.extend_from_slice(&buf[..n]);
+                    if response.windows(PROMPT.len()).any(|w| w == PROMPT) {
+                        break;
+                    }
+                }
+                Ok(_) => {}
+                Err(_) => thread::sleep(Duration::from_millis(10)),
+            }
+        }
+
+        let output = String::from_utf8_lossy(&response);
+        let files: Vec<String> = output
+            .lines()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty() && !s.contains("$:"))
+            .collect();
+
+        Ok(files)
+    }
+
     fn put_file(&mut self, local_path: &PathBuf, remote_path: &str) -> Result<()> {
+        match self.mode {
+            DeviceMode::MicroPythonRepl => self.put_file_repl(local_path, remote_path),
+            DeviceMode::UpyOS => self.put_file_upyos(local_path, remote_path),
+            DeviceMode::Unknown => {
+                // Try REPL mode first
+                self.put_file_repl(local_path, remote_path)
+            }
+        }
+    }
+
+    fn put_file_repl(&mut self, local_path: &PathBuf, remote_path: &str) -> Result<()> {
         let content = std::fs::read(local_path)
             .with_context(|| format!("Could not read {}", local_path.display()))?;
 
@@ -289,7 +480,77 @@ print('OK')"#,
         }
     }
 
+    fn put_file_upyos(&mut self, local_path: &PathBuf, remote_path: &str) -> Result<()> {
+        self.ensure_upyos_mode()?;
+
+        let content = std::fs::read_to_string(local_path)
+            .with_context(|| format!("Could not read {}", local_path.display()))?;
+
+        // For upyOS, we can use cat with heredoc or cp command
+        // First, try using a simple approach with echo commands
+        let lines: Vec<&str> = content.lines().collect();
+
+        if lines.is_empty() {
+            // Create empty file
+            let cmd = format!("> {}\r", remote_path);
+            self.write(cmd.as_bytes())?;
+            thread::sleep(Duration::from_millis(200));
+        } else {
+            // Use cat with heredoc-like syntax
+            // upyOS supports: cat > filename << 'EOF'
+            let cmd = format!("cat > {} << 'ENDOFFILE'\r", remote_path);
+            self.write(cmd.as_bytes())?;
+
+            for line in lines {
+                self.write(line.as_bytes())?;
+                self.write(b"\r")?;
+                thread::sleep(Duration::from_millis(10));
+            }
+
+            self.write(b"ENDOFFILE\r")?;
+            thread::sleep(Duration::from_millis(500));
+        }
+
+        // Wait for prompt
+        let mut response = Vec::new();
+        let mut buf = [0u8; 1024];
+        let start = std::time::Instant::now();
+        const PROMPT: &[u8] = b"$:";
+
+        while start.elapsed().as_secs() < 10 {
+            match self.port.read(&mut buf) {
+                Ok(n) if n > 0 => {
+                    response.extend_from_slice(&buf[..n]);
+                    if response.windows(PROMPT.len()).any(|w| w == PROMPT) {
+                        break;
+                    }
+                }
+                Ok(_) => {}
+                Err(_) => thread::sleep(Duration::from_millis(10)),
+            }
+        }
+
+        println!(
+            "✓ File '{}' uploaded to '{}' ({} bytes)",
+            local_path.display(),
+            remote_path,
+            content.len()
+        );
+        Ok(())
+    }
+
     fn get_file(&mut self, remote_path: &str, local_path: &PathBuf) -> Result<()> {
+        match self.mode {
+            DeviceMode::MicroPythonRepl => self.get_file_repl(remote_path, local_path),
+            DeviceMode::UpyOS => self.get_file_upyos(remote_path, local_path),
+            DeviceMode::Unknown => {
+                // Try REPL mode first
+                self.get_file_repl(remote_path, local_path)
+            }
+        }
+    }
+
+    fn get_file_repl(&mut self, remote_path: &str, local_path: &PathBuf) -> Result<()> {
         let cmd = format!(
             r#"import ubinascii
 try:
@@ -328,6 +589,55 @@ except OSError as e:
             remote_path,
             local_path.display(),
             content_len
+        );
+        Ok(())
+    }
+
+    fn get_file_upyos(&mut self, remote_path: &str, local_path: &PathBuf) -> Result<()> {
+        self.ensure_upyos_mode()?;
+
+        // Use cat command to read file
+        let cmd = format!("cat {}\r", remote_path);
+        self.write(cmd.as_bytes())?;
+
+        // Read response until prompt
+        let mut response = Vec::new();
+        let mut buf = [0u8; 1024];
+        let start = std::time::Instant::now();
+        const PROMPT: &[u8] = b"$:";
+
+        while start.elapsed().as_secs() < 10 {
+            match self.port.read(&mut buf) {
+                Ok(n) if n > 0 => {
+                    response.extend_from_slice(&buf[..n]);
+                    if response.windows(PROMPT.len()).any(|w| w == PROMPT) {
+                        break;
+                    }
+                }
+                Ok(_) => {}
+                Err(_) => thread::sleep(Duration::from_millis(10)),
+            }
+        }
+
+        // Parse response - remove command echo and prompt
+        let output = String::from_utf8_lossy(&response);
+        let lines: Vec<&str> = output.lines().collect();
+
+        // Skip first line (command) and last line (prompt)
+        let content_lines: Vec<&str> = if lines.len() > 2 {
+            lines[1..lines.len() - 1].to_vec()
+        } else {
+            lines.to_vec()
+        };
+
+        let content = content_lines.join("\n");
+        std::fs::write(local_path, content)
+            .with_context(|| format!("Could not write {}", local_path.display()))?;
+
+        println!(
+            "✓ File '{}' downloaded to '{}'",
+            remote_path,
+            local_path.display()
         );
         Ok(())
     }
@@ -491,9 +801,20 @@ except OSError as e:
         }
 
         // Interactive mode with raw terminal
-        println!("Connected to device. Press Ctrl+X to exit.");
-        println!("Use up/down arrows for command history.");
-        println!("MicroPython REPL ---");
+        match self.mode {
+            DeviceMode::MicroPythonRepl => {
+                println!("Connected to device (MicroPython REPL). Press Ctrl+X to exit.");
+                println!("Use up/down arrows for command history.");
+                println!("MicroPython REPL ---");
+            }
+            DeviceMode::UpyOS => {
+                println!("Connected to device (upyOS). Press Ctrl+X to exit.");
+                println!("upyOS Shell ---");
+            }
+            DeviceMode::Unknown => {
+                println!("Connected to device (mode unknown). Press Ctrl+X to exit.");
+            }
+        }
         println!();
 
         // Send Ctrl-C to interrupt any running program
