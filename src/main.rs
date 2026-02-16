@@ -486,48 +486,86 @@ print('OK')"#,
         let content = std::fs::read_to_string(local_path)
             .with_context(|| format!("Could not read {}", local_path.display()))?;
 
-        // For upyOS, we can use cat with heredoc or cp command
-        // First, try using a simple approach with echo commands
-        let lines: Vec<&str> = content.lines().collect();
-
-        if lines.is_empty() {
-            // Create empty file
-            let cmd = format!("> {}\r", remote_path);
-            self.write(cmd.as_bytes())?;
-            thread::sleep(Duration::from_millis(200));
-        } else {
-            // Use cat with heredoc-like syntax
-            // upyOS supports: cat > filename << 'EOF'
-            let cmd = format!("cat > {} << 'ENDOFFILE'\r", remote_path);
-            self.write(cmd.as_bytes())?;
-
-            for line in lines {
-                self.write(line.as_bytes())?;
-                self.write(b"\r")?;
-                thread::sleep(Duration::from_millis(10));
-            }
-
-            self.write(b"ENDOFFILE\r")?;
-            thread::sleep(Duration::from_millis(500));
+        // Check file size (upyOS fileup has 20KB limit)
+        if content.len() > 20000 {
+            anyhow::bail!("File too large for upyOS fileup (max 20KB)");
         }
 
-        // Wait for prompt
+        // Use upyOS fileup command
+        let cmd = format!("fileup {}\r", remote_path);
+        self.write(cmd.as_bytes())?;
+
+        // Wait for fileup to start and show message
         let mut response = Vec::new();
         let mut buf = [0u8; 1024];
         let start = std::time::Instant::now();
-        const PROMPT: &[u8] = b"$:";
 
-        while start.elapsed().as_secs() < 10 {
+        while start.elapsed().as_secs() < 5 {
             match self.port.read(&mut buf) {
                 Ok(n) if n > 0 => {
                     response.extend_from_slice(&buf[..n]);
-                    if response.windows(PROMPT.len()).any(|w| w == PROMPT) {
+                    let resp_str = String::from_utf8_lossy(&response);
+                    if resp_str.contains("Send CTRL+D to end upload") || resp_str.contains(">") {
                         break;
                     }
                 }
                 Ok(_) => {}
                 Err(_) => thread::sleep(Duration::from_millis(10)),
             }
+        }
+
+        // Send file content line by line, waiting for ">" prompt
+        let lines: Vec<&str> = content.lines().collect();
+
+        for line in lines {
+            // Wait for ">" prompt
+            let mut prompt_buf = [0u8; 256];
+            let prompt_start = std::time::Instant::now();
+            let mut prompt_response = Vec::new();
+
+            while prompt_start.elapsed().as_millis() < 500 {
+                match self.port.read(&mut prompt_buf) {
+                    Ok(n) if n > 0 => {
+                        prompt_response.extend_from_slice(&prompt_buf[..n]);
+                        if prompt_response.contains(&b'>') {
+                            break;
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(_) => thread::sleep(Duration::from_millis(5)),
+                }
+            }
+
+            // Send the line
+            self.write(line.as_bytes())?;
+            self.write(b"\r")?;
+        }
+
+        // Send Ctrl+D to end upload
+        self.write(&[0x04])?;
+
+        // Wait for completion and return to shell prompt
+        let mut final_response = Vec::new();
+        let final_start = std::time::Instant::now();
+        const PROMPT: &[u8] = b"$:";
+
+        while final_start.elapsed().as_secs() < 10 {
+            match self.port.read(&mut buf) {
+                Ok(n) if n > 0 => {
+                    final_response.extend_from_slice(&buf[..n]);
+                    if final_response.windows(PROMPT.len()).any(|w| w == PROMPT) {
+                        break;
+                    }
+                }
+                Ok(_) => {}
+                Err(_) => thread::sleep(Duration::from_millis(10)),
+            }
+        }
+
+        // Check for errors in response
+        let resp_str = String::from_utf8_lossy(&final_response);
+        if resp_str.contains("Can't overwrite system file") {
+            anyhow::bail!("Cannot overwrite system file '{}'", remote_path);
         }
 
         println!(
